@@ -1,0 +1,1 @@
+sudo -i -u postgres /usr/local/pgsql/bin/psql test
