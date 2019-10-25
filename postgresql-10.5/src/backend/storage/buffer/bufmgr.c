@@ -1046,6 +1046,8 @@ BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 			}
 		}
 
+		//Got it; add to the back of the list
+		addBufList(buf);
 		return buf;
 	}
 

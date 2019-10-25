@@ -1,1 +1,1 @@
-sudo -u postgres /usr/local/pgsql/bin/postgres -B 16 -D /usr/local/pgsql/data >logfile 2>&1 &
+sudo -u postgres /usr/local/pgsql/bin/postgres -B 200 -D /usr/local/pgsql/data >logfile 2>&1 &
