@@ -103,6 +103,161 @@ static BufferDesc *GetBufferFromRing(BufferAccessStrategy strategy,
 static void AddBufferToRing(BufferAccessStrategy strategy,
 				BufferDesc *buf);
 
+typedef struct bufList {
+	int buf_id;
+	int next;
+	int prev;
+} bufListstruct;
+
+static bufListstruct *bufList;
+static int bufferListHead = -1;
+static int bufferListTail = -1;
+slock_t bufferList_lock;
+
+void initBufList()
+{
+	bufList = malloc(sizeof(bufListstruct) * NBuffers);
+	for(int i = 0; i < NBuffers; i++)
+	{
+		bufList[i].buf_id = i;
+		bufList[i].next = -1;
+		bufList[i].prev = -1;
+	}
+}
+
+void
+printList()
+{
+	// int next = bufferListHead;
+	// char out[1000] = "bufList ";
+	// char tmp[100] = "";
+
+	// sprintf(tmp, "HEAD = %d TAIL = %d: ", bufferListHead, bufferListTail);
+	// strcat(out, tmp);
+
+	// while(next != -1)
+	// {//
+	// 	sprintf(tmp, "%d ", next);
+	// 	strcat(out, tmp);
+	// 	next = bufList[next].next;
+	// }
+	// elog(LOG, out);
+}
+
+void
+removeBufListLocked(BufferDesc *buf)
+{
+	elog(LOG, "Removing %d from the bufList", buf->buf_id);
+	if(bufList[buf->buf_id].prev == -1 && bufList[buf->buf_id].next == -1)
+	{
+		//Already removed
+		elog(LOG, "%d is already off the bufList", buf->buf_id);
+		printList();
+		SpinLockRelease(&bufferList_lock);
+		return;
+	}
+
+	//If previous exists, point to next
+	if(bufList[buf->buf_id].prev != -1)
+	{
+		int prev = bufList[buf->buf_id].prev;
+		bufList[prev].next = bufList[buf->buf_id].next;
+	}
+
+	//If next exists, point to previous
+	if(bufList[buf->buf_id].next != -1)
+	{
+		int next = bufList[buf->buf_id].next;
+		bufList[next].prev = bufList[buf->buf_id].prev;
+	}
+
+	//If this is the head, set head to next
+	if(bufferListHead == buf->buf_id)
+	{
+		bufferListHead = bufList[buf->buf_id].next;
+	}
+
+	//If this is the tail, set tail to prev
+	//NOTE: if this was last, head and tail now both point to -1
+	if(bufferListTail == buf->buf_id)
+	{
+		bufferListTail = bufList[buf->buf_id].prev;
+	}
+
+	//Remove from list now
+	bufList[buf->buf_id].next = -1;
+	bufList[buf->buf_id].prev = -1;
+
+	elog(LOG, "Finished removing %d", buf->buf_id);
+	printList();
+}
+
+void
+removeBufList(BufferDesc *buf)
+{
+	SpinLockAcquire(&bufferList_lock);
+	removeBufListLocked(buf);
+	SpinLockRelease(&bufferList_lock);
+}
+
+void
+addBufListLocked(BufferDesc *buf)
+{
+	elog(LOG, "Adding %d to the bufList", buf->buf_id);
+	if(bufferListTail == buf->buf_id)
+	{
+		//Already at the end of the buflist
+		elog(LOG, " %d already at the end of the bufList", buf->buf_id);
+		return;
+	}
+
+	//Remove it from the list
+	removeBufListLocked(buf);
+
+	//Check if list is empty
+	if(bufferListTail == -1)
+	{
+		//List empty
+		bufferListTail = buf->buf_id;
+		bufferListHead = buf->buf_id;
+		elog(LOG, "Finished adding %d", buf->buf_id);
+		printList();
+		return;
+	}
+
+	//Point the existing previous to this buffer
+	bufList[bufferListTail].next = buf->buf_id;
+
+	//Point buf backwards
+	bufList[buf->buf_id].prev = bufferListTail;
+
+	//Place on end
+	bufferListTail = buf->buf_id;
+	bufList[buf->buf_id].next = -1;
+
+	elog(LOG, "Finished adding %d", buf->buf_id);
+	printList();
+}
+
+void
+addBufList(BufferDesc *buf)
+{
+	SpinLockAcquire(&bufferList_lock);
+	addBufListLocked(buf);
+	SpinLockRelease(&bufferList_lock);
+}
+
+int
+popBufferList()
+{
+	int buf_id;
+	SpinLockAcquire(&bufferList_lock);
+	buf_id = bufferListHead;
+	addBufListLocked(GetBufferDescriptor(buf_id));
+	SpinLockRelease(&bufferList_lock);
+	return buf_id;
+}
+
 /*
  * ClockSweepTick - Helper routine for StrategyGetBuffer()
  *
@@ -268,6 +423,11 @@ StrategyGetBuffer(BufferAccessStrategy strategy, uint32 *buf_state)
 			StrategyControl->firstFreeBuffer = buf->freeNext;
 			buf->freeNext = FREENEXT_NOT_IN_LIST;
 
+			//Add it to the buflist
+			elog(LOG, "Removed %d from the free list", buf->buf_id);
+			addBufList(buf);
+			elog(LOG, "Successfully add %d", buf->buf_id);
+
 			/*
 			 * Release the lock so someone else can access the freelist while
 			 * we check out this buffer.
@@ -299,7 +459,11 @@ StrategyGetBuffer(BufferAccessStrategy strategy, uint32 *buf_state)
 	trycounter = NBuffers;
 	for (;;)
 	{
-		buf = GetBufferDescriptor(ClockSweepTick());
+		//buf = GetBufferDescriptor(ClockSweepTick());
+		//No more sweeping; get it from the list!
+		elog(LOG, "Get buf %d", bufferListHead);
+		buf = GetBufferDescriptor(popBufferList());
+		addBufList(buf);
 
 		/*
 		 * If the buffer is pinned or has a nonzero usage_count, we cannot use
@@ -309,13 +473,6 @@ StrategyGetBuffer(BufferAccessStrategy strategy, uint32 *buf_state)
 
 		if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0)
 		{
-			if (BUF_STATE_GET_USAGECOUNT(local_buf_state) != 0)
-			{
-				local_buf_state -= BUF_USAGECOUNT_ONE;
-
-				trycounter = NBuffers;
-			}
-			else
 			{
 				/* Found a usable buffer */
 				if (strategy != NULL)
@@ -334,6 +491,7 @@ StrategyGetBuffer(BufferAccessStrategy strategy, uint32 *buf_state)
 			 * infinite loop.
 			 */
 			UnlockBufHdr(buf, local_buf_state);
+			printList();
 			elog(ERROR, "no unpinned buffers available");
 		}
 		UnlockBufHdr(buf, local_buf_state);
@@ -347,7 +505,7 @@ void
 StrategyFreeBuffer(BufferDesc *buf)
 {
 	SpinLockAcquire(&StrategyControl->buffer_strategy_lock);
-
+	elog(LOG, "Adding buf %d to the free list", buf->buf_id);
 	/*
 	 * It is possible that we are told to put something in the freelist that
 	 * is already in it; don't screw up the list if so.
@@ -359,6 +517,9 @@ StrategyFreeBuffer(BufferDesc *buf)
 			StrategyControl->lastFreeBuffer = buf->buf_id;
 		StrategyControl->firstFreeBuffer = buf->buf_id;
 	}
+	//Remove from bufferList
+	removeBufList(buf);
+	elog(LOG, "Add buf %d\n", buf->buf_id);
 
 	SpinLockRelease(&StrategyControl->buffer_strategy_lock);
 }
@@ -487,6 +648,10 @@ StrategyInitialize(bool init)
 		Assert(init);
 
 		SpinLockInit(&StrategyControl->buffer_strategy_lock);
+
+		//Init my lock
+		SpinLockInit(&bufferList_lock);
+		initBufList();
 
 		/*
 		 * Grab the whole linked list of free buffers for our strategy. We

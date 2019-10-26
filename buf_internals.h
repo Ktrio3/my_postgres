@@ -185,6 +185,7 @@ typedef struct BufferDesc
 
 	int			wait_backend_pid;	/* backend PID of pin-count waiter */
 	int			freeNext;		/* link in freelist chain */
+	int			freePrev;		/* link in freelist chain */
 
 	LWLock		content_lock;	/* to lock access to buffer contents */
 } BufferDesc;
@@ -246,7 +247,6 @@ extern uint32 LockBufHdr(BufferDesc *desc);
 		pg_write_barrier(); \
 		pg_atomic_write_u32(&(desc)->state, (s) & (~BM_LOCKED)); \
 	} while (0)
-
 
 /*
  * The PendingWriteback & WritebackContext structure are used to keep

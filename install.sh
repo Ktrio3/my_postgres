@@ -1,4 +1,6 @@
-cd postgresql-10.5
+cp buf_init.c bufmgr.c freelist.c ../postgresql-10.5/src/backend/storage/buffer/
+cp buf_internals.h ../postgresql-10.5/src/include/storage/
+cd ../postgresql-10.5
 #./configure
 make
 sudo make install
