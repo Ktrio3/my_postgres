@@ -185,7 +185,6 @@ typedef struct BufferDesc
 
 	int			wait_backend_pid;	/* backend PID of pin-count waiter */
 	int			freeNext;		/* link in freelist chain */
-	int			freePrev;		/* link in freelist chain */
 
 	LWLock		content_lock;	/* to lock access to buffer contents */
 } BufferDesc;
@@ -336,5 +335,29 @@ extern void DropRelFileNodeLocalBuffers(RelFileNode rnode, ForkNumber forkNum,
 							BlockNumber firstDelBlock);
 extern void DropRelFileNodeAllLocalBuffers(RelFileNode rnode);
 extern void AtEOXact_LocalBuffers(bool isCommit);
+
+//kevindennis
+//Freelist.c
+
+//Allocates memory for the buffer list
+void initBufList(void);
+
+//Prints out the buffer list. DEBUGGING ONLY FOR SMALL # OF BUFFERS
+void printList(void); 
+
+//Removes a buffer from the list, assumming locks are already held (i.e., called by other buffer funcs)
+void removeBufListLocked(BufferDesc *buf);
+
+//Removes a buffer from the buffer list
+void removeBufList(BufferDesc *buf);
+
+//Adds a buffer to the list, assumming locks are already held (i.e., called by other buffer funcs)
+void addBufListLocked(BufferDesc *buf);
+
+//Adds a buffer to the buffer list
+void addBufList(BufferDesc *buf);
+
+//Pops the least recently used buffer
+int popBufferList(void);
 
 #endif							/* BUFMGR_INTERNALS_H */

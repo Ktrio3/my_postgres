@@ -1,7 +1,7 @@
 -- This script assumes that the files are all in the same folder as the database itself.  You will need to change lines 4, 27-33
 -- to fix this for your system.
 
-\o proj2-kevindennis.out
+\o /home/kevindennis/database/my_postgres/test/proj2-kevindennis.out
 
 drop table teams;
 drop table coaches_season;
@@ -25,12 +25,12 @@ create table player_rs_career (ilkid varchar(30), firstname varchar(30), lastnam
 create table player_rs (ilkid varchar(30), year int, firstname varchar(30), lastname varchar(30), tid varchar(30), league varchar(10), gp int, minutes int, pts int, dreb int, oreb int, reb int, asts int, stl int, blk int, turnover int, pf int, fga int, fgm int, fta int, ftm int, tpa int, tpm int, primary key(ilkid, year, tid));
 
 -- 0. Under psql, load all the above tables with data obtained from the corresponding txt file. An example is : \copy teams from 'teams.txt' with delimiter ','
-\copy teams from '../kevindennis/db/teams.txt' with delimiter ','
-\copy coaches_season from '../kevindennis/db/coaches_season.txt' with delimiter ','
-\copy players from '../kevindennis/db/players.txt' with delimiter ','
-\copy player_rs from '../kevindennis/db/player_rs.txt' with delimiter ','
-\copy player_rs_career from '../kevindennis/db/player_rs_career.txt' with delimiter ','
-\copy draft from '../kevindennis/db/draft.txt' with delimiter ','
+\copy teams from '/home/kevindennis/database/my_postgres/test/teams.txt' with delimiter ','
+\copy coaches_season from '/home/kevindennis/database/my_postgres/test/coaches_season.txt' with delimiter ','
+\copy players from '/home/kevindennis/database/my_postgres/test/players.txt' with delimiter ','
+\copy player_rs from '/home/kevindennis/database/my_postgres/test/player_rs.txt' with delimiter ','
+\copy player_rs_career from '/home/kevindennis/database/my_postgres/test/player_rs_career.txt' with delimiter ','
+\copy draft from '/home/kevindennis/database/my_postgres/test/draft.txt' with delimiter ','
 
 
 SELECT DISTINCT c.firstname,c.lastname,c.year FROM coaches_season c, player_rs p

@@ -36,7 +36,7 @@ typedef struct
 	 * this isn't a concrete buffer - we only ever increase the value. So, to
 	 * get an actual buffer, it needs to be used modulo NBuffers.
 	 */
-	pg_atomic_uint32 nextVictimBuffer;
+	pg_atomic_uint32 nextVictimBuffer;//
 
 	int			firstFreeBuffer;	/* Head of list of unused buffers */
 	int			lastFreeBuffer; /* Tail of list of unused buffers */
@@ -103,17 +103,21 @@ static BufferDesc *GetBufferFromRing(BufferAccessStrategy strategy,
 static void AddBufferToRing(BufferAccessStrategy strategy,
 				BufferDesc *buf);
 
+//kevindennis
+// A linked list structure for use in an array-style linked list
 typedef struct bufList {
 	int buf_id;
 	int next;
 	int prev;
 } bufListstruct;
 
-static bufListstruct *bufList;
-static int bufferListHead = -1;
-static int bufferListTail = -1;
-slock_t bufferList_lock;
+static bufListstruct *bufList;   //Array to store the buffer list
+static int bufferListHead = -1;  //Least recently used buffer
+static int bufferListTail = -1;  //Most recently used buffer
+slock_t bufferList_lock;         //Lock for the buffer list
 
+
+//Allocates memory for the buffer list
 void initBufList()
 {
 	bufList = malloc(sizeof(bufListstruct) * NBuffers);
@@ -125,6 +129,7 @@ void initBufList()
 	}
 }
 
+//Prints out the buffer list. DEBUGGING ONLY FOR SMALL # OF BUFFERS
 void
 printList()
 {
@@ -144,14 +149,15 @@ printList()
 	// elog(LOG, out);
 }
 
+//Removes a buffer from the list, assumming locks are already held (i.e., called by other buffer funcs)
 void
 removeBufListLocked(BufferDesc *buf)
 {
-	elog(LOG, "Removing %d from the bufList", buf->buf_id);
+	//elog(LOG, "Removing %d from the bufList", buf->buf_id);
 	if(bufList[buf->buf_id].prev == -1 && bufList[buf->buf_id].next == -1)
 	{
 		//Already removed
-		elog(LOG, "%d is already off the bufList", buf->buf_id);
+		//elog(LOG, "%d is already off the bufList", buf->buf_id);
 		printList();
 		SpinLockRelease(&bufferList_lock);
 		return;
@@ -188,30 +194,34 @@ removeBufListLocked(BufferDesc *buf)
 	bufList[buf->buf_id].next = -1;
 	bufList[buf->buf_id].prev = -1;
 
-	elog(LOG, "Finished removing %d", buf->buf_id);
+	//elog(LOG, "Finished removing %d", buf->buf_id);
 	printList();
 }
 
+//Removes a buffer from the buffer list
 void
 removeBufList(BufferDesc *buf)
 {
+	//Get lock and call other function
 	SpinLockAcquire(&bufferList_lock);
 	removeBufListLocked(buf);
 	SpinLockRelease(&bufferList_lock);
 }
 
+//Adds a buffer to the list, assumming locks are already held (i.e., called by other buffer funcs)
 void
 addBufListLocked(BufferDesc *buf)
 {
-	elog(LOG, "Adding %d to the bufList", buf->buf_id);
+	elog(LOG, "Add buf %d", buf->buf_id);
+	//elog(LOG, "Adding %d to the bufList", buf->buf_id);
 	if(bufferListTail == buf->buf_id)
 	{
 		//Already at the end of the buflist
-		elog(LOG, " %d already at the end of the bufList", buf->buf_id);
+		//elog(LOG, " %d already at the end of the bufList", buf->buf_id);
 		return;
 	}
 
-	//Remove it from the list
+	//Remove it from the list to simplify assumptions
 	removeBufListLocked(buf);
 
 	//Check if list is empty
@@ -220,7 +230,7 @@ addBufListLocked(BufferDesc *buf)
 		//List empty
 		bufferListTail = buf->buf_id;
 		bufferListHead = buf->buf_id;
-		elog(LOG, "Finished adding %d", buf->buf_id);
+		//elog(LOG, "Finished adding %d", buf->buf_id);
 		printList();
 		return;
 	}
@@ -235,28 +245,36 @@ addBufListLocked(BufferDesc *buf)
 	bufferListTail = buf->buf_id;
 	bufList[buf->buf_id].next = -1;
 
-	elog(LOG, "Finished adding %d", buf->buf_id);
+	//elog(LOG, "Finished adding %d", buf->buf_id);
 	printList();
 }
 
+//Adds a buffer to the buffer list
 void
 addBufList(BufferDesc *buf)
 {
+	//Acquire lock and call the other function
 	SpinLockAcquire(&bufferList_lock);
 	addBufListLocked(buf);
 	SpinLockRelease(&bufferList_lock);
 }
 
+//Pops the least recently used buffer
 int
 popBufferList()
 {
 	int buf_id;
 	SpinLockAcquire(&bufferList_lock);
+
+	//Get the next buffer. It is now used, so move it to the back of the line
 	buf_id = bufferListHead;
+	elog(LOG, "Get buf %d", buf_id);
 	addBufListLocked(GetBufferDescriptor(buf_id));
+
 	SpinLockRelease(&bufferList_lock);
 	return buf_id;
 }
+//end kevindennis
 
 /*
  * ClockSweepTick - Helper routine for StrategyGetBuffer()
@@ -423,10 +441,12 @@ StrategyGetBuffer(BufferAccessStrategy strategy, uint32 *buf_state)
 			StrategyControl->firstFreeBuffer = buf->freeNext;
 			buf->freeNext = FREENEXT_NOT_IN_LIST;
 
+			//kevindennis
 			//Add it to the buflist
-			elog(LOG, "Removed %d from the free list", buf->buf_id);
+			//elog(LOG, "Removed %d from the free list", buf->buf_id);
+			elog(LOG, "Get buf %d", buf->buf_id);
 			addBufList(buf);
-			elog(LOG, "Successfully add %d", buf->buf_id);
+			//elog(LOG, "Successfully add %d", buf->buf_id);
 
 			/*
 			 * Release the lock so someone else can access the freelist while
@@ -459,9 +479,9 @@ StrategyGetBuffer(BufferAccessStrategy strategy, uint32 *buf_state)
 	trycounter = NBuffers;
 	for (;;)
 	{
+		//kevindennis
 		//buf = GetBufferDescriptor(ClockSweepTick());
 		//No more sweeping; get it from the list!
-		elog(LOG, "Get buf %d", bufferListHead);
 		buf = GetBufferDescriptor(popBufferList());
 		addBufList(buf);
 
@@ -491,7 +511,6 @@ StrategyGetBuffer(BufferAccessStrategy strategy, uint32 *buf_state)
 			 * infinite loop.
 			 */
 			UnlockBufHdr(buf, local_buf_state);
-			printList();
 			elog(ERROR, "no unpinned buffers available");
 		}
 		UnlockBufHdr(buf, local_buf_state);
@@ -505,7 +524,7 @@ void
 StrategyFreeBuffer(BufferDesc *buf)
 {
 	SpinLockAcquire(&StrategyControl->buffer_strategy_lock);
-	elog(LOG, "Adding buf %d to the free list", buf->buf_id);
+	//elog(LOG, "Adding buf %d to the free list", buf->buf_id);
 	/*
 	 * It is possible that we are told to put something in the freelist that
 	 * is already in it; don't screw up the list if so.
@@ -517,9 +536,6 @@ StrategyFreeBuffer(BufferDesc *buf)
 			StrategyControl->lastFreeBuffer = buf->buf_id;
 		StrategyControl->firstFreeBuffer = buf->buf_id;
 	}
-	//Remove from bufferList
-	removeBufList(buf);
-	elog(LOG, "Add buf %d\n", buf->buf_id);
 
 	SpinLockRelease(&StrategyControl->buffer_strategy_lock);
 }
@@ -649,6 +665,7 @@ StrategyInitialize(bool init)
 
 		SpinLockInit(&StrategyControl->buffer_strategy_lock);
 
+		//kevindennis
 		//Init my lock
 		SpinLockInit(&bufferList_lock);
 		initBufList();

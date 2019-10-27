@@ -1046,7 +1046,9 @@ BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 			}
 		}
 
+		//kevindennis
 		//Got it; add to the back of the list
+		elog(LOG, "Get buf %d", buf->buf_id);
 		addBufList(buf);
 		return buf;
 	}
